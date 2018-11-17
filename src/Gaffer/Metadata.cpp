@@ -39,6 +39,7 @@
 #include "Gaffer/Action.h"
 #include "Gaffer/Node.h"
 #include "Gaffer/Plug.h"
+#include "Gaffer/Reference.h"
 
 #include "IECore/CompoundData.h"
 #include "IECore/SimpleTypedData.h"
@@ -375,6 +376,36 @@ void registeredInstanceValues( const GraphComponent *graphComponent, std::vector
 	}
 }
 
+const Plug *referencedDescendant( const Plug *plug )
+{
+	if( plug->direction() == Plug::Out )
+	{
+		const Plug *input = plug->getInput();
+		if( input && input->node()->parent() == plug->node() )
+		{
+			if( runTimeCast<const Reference>( input->node() ) )
+			{
+				return input;
+			}
+		}
+	}
+	else
+	{
+		for( Plug::OutputContainer::const_iterator it = plug->outputs().begin(), eIt = plug->outputs().end(); it != eIt; ++it )
+		{
+			if( (*it)->node()->parent() == plug->node() )
+			{
+				if( runTimeCast<const Reference>( (*it)->node() ) )
+				{
+					return *it;
+				}
+			}
+		}
+	}
+
+	return nullptr;
+}
+
 } // namespace
 
 void Metadata::registerValue( IECore::InternedString target, IECore::InternedString key, IECore::ConstDataPtr value )
@@ -680,6 +711,11 @@ void Metadata::registeredPlugValues( const Plug *plug, std::vector<IECore::Inter
 	}
 
 	registeredInstanceValues( plug, keys, persistentOnly );
+
+	if( const Plug *fallback = referencedDescendant( plug ) )
+	{
+		registeredPlugValues( fallback, keys, inherit, instanceOnly );
+	}
 }
 
 IECore::ConstDataPtr Metadata::plugValueInternal( const Plug *plug, IECore::InternedString key, bool inherit, bool instanceOnly )
@@ -735,6 +771,12 @@ IECore::ConstDataPtr Metadata::plugValueInternal( const Plug *plug, IECore::Inte
 		}
 		typeId = inherit ? RunTimeTyped::baseTypeId( typeId ) : InvalidTypeId;
 	}
+
+	if( const Plug *fallback = referencedDescendant( plug ) )
+	{
+		return plugValueInternal( fallback, key, inherit, instanceOnly );
+	}
+
 	return nullptr;
 }
 
