@@ -252,6 +252,8 @@ const AtString g_backgroundArnoldString( "background" );
 const AtString g_boxArnoldString("box");
 const AtString g_cameraArnoldString( "camera" );
 const AtString g_catclarkArnoldString("catclark");
+const AtString g_cortexProceduralArnoldString( "cortex_procedural" );
+const AtString g_cortexProceduralDataArnoldString( "cortex_procedural_data" );
 const AtString g_customAttributesArnoldString( "custom_attributes" );
 const AtString g_curvesArnoldString("curves");
 const AtString g_dispMapArnoldString( "disp_map" );
@@ -277,9 +279,10 @@ const AtString g_motionStartArnoldString( "motion_start" );
 const AtString g_motionEndArnoldString( "motion_end" );
 const AtString g_nameArnoldString( "name" );
 const AtString g_nodeArnoldString("node");
+const AtString g_nullArnoldString( nullptr );
 const AtString g_objectArnoldString( "object" );
 const AtString g_opaqueArnoldString( "opaque" );
-const AtString g_proceduralArnoldString( "procedural" );
+const AtString g_parallelInitArnoldString( "parallel_init" );
 const AtString g_pinCornersArnoldString( "pin_corners" );
 const AtString g_pixelAspectRatioArnoldString( "pixel_aspect_ratio" );
 const AtString g_pluginSearchPathArnoldString( "plugin_searchpath" );
@@ -311,7 +314,6 @@ const AtString g_transformTypeArnoldString( "transform_type" );
 const AtString g_thickArnoldString( "thick" );
 const AtString g_useLightGroupArnoldString( "use_light_group" );
 const AtString g_useShadowGroupArnoldString( "use_shadow_group" );
-const AtString g_userPtrArnoldString( "userptr" );
 const AtString g_visibilityArnoldString( "visibility" );
 const AtString g_volumeArnoldString("volume");
 const AtString g_volumePaddingArnoldString( "volume_padding" );
@@ -2452,53 +2454,55 @@ struct ProceduralData : boost::noncopyable
 	vector<AtNode *> nodesCreated;
 };
 
-int procInit( AtNode *node, void **userPtr )
+static void Parameters( AtList *paramList, AtNodeEntry *nentry )
 {
-	ProceduralData *data = (ProceduralData *)( AiNodeGetPtr( node, g_userPtrArnoldString ) );
+	AiNodeParamPtr( paramList, -1, g_cortexProceduralDataArnoldString, nullptr );
+	AiMetaDataSetBool( nentry, g_nullArnoldString, g_parallelInitArnoldString, true );
+}
+
+static int ProceduralInit( AtNode *node, void **userPtr )
+{
+	ProceduralData *data = (ProceduralData *)( AiNodeGetPtr( node, g_cortexProceduralDataArnoldString ) );
+	if( !data )
+	{
+		return 0;
+	}
+
 	*userPtr = data;
 	return 1;
 }
 
-int procCleanup( const AtNode *node, void *userPtr )
+static int ProceduralCleanup( const AtNode *node, void *userPtr )
 {
 	const ProceduralData *data = (ProceduralData *)( userPtr );
 	delete data;
 	return 1;
 }
 
-int procNumNodes( const AtNode *node, void *userPtr )
+static int ProceduralNumNodes( const AtNode *node, void *userPtr )
 {
 	const ProceduralData *data = (ProceduralData *)( userPtr );
 	return data->nodesCreated.size();
 }
 
-AtNode *procGetNode( const AtNode *node, void *userPtr, int i )
+static AtNode *ProceduralGetNode( const AtNode *node, void *userPtr, int i )
 {
 	const ProceduralData *data = (ProceduralData *)( userPtr );
 	return data->nodesCreated[i];
 }
 
-int procFunc( AtProceduralNodeMethods *methods )
-{
-	methods->Init = procInit;
-	methods->Cleanup = procCleanup;
-	methods->NumNodes = procNumNodes;
-	methods->GetNode = procGetNode;
-	return 1;
-}
+AI_PROCEDURAL_NODE_EXPORT_METHODS( g_cortexArnoldProceduralMethods );
 
 AtNode *convertProcedural( IECoreScenePreview::ConstProceduralPtr procedural, const std::string &nodeName, const AtNode *parentNode )
 {
-	AtNode *node = AiNode( g_proceduralArnoldString, AtString( nodeName.c_str() ), parentNode );
-
-	AiNodeSetPtr( node, g_funcPtrArnoldString, (void *)procFunc );
+	AtNode *node = AiNode( g_cortexProceduralArnoldString, AtString( nodeName.c_str() ), parentNode );
 
 	ProceduralRendererPtr renderer = new ProceduralRenderer( node );
 	procedural->render( renderer.get() );
 
 	ProceduralData *data = new ProceduralData;
 	renderer->nodesCreated( data->nodesCreated );
-	AiNodeSetPtr( node, g_userPtrArnoldString, data );
+	AiNodeSetPtr( node, g_cortexProceduralDataArnoldString, data );
 
 	return node;
 }
@@ -3379,11 +3383,21 @@ class ArnoldRenderer final : public ArnoldRendererBase
 			:	ArnoldRendererBase( nodeDeleter( renderType ) ),
 				m_globals( new ArnoldGlobals( renderType, fileName, m_shaderCache.get() ) )
 		{
+			AiNodeEntryInstall(
+				/* type */ AI_NODE_SHAPE_PROCEDURAL,
+				/* output_type */ AI_TYPE_UNDEFINED,
+				/* name */ g_cortexProceduralArnoldString,
+				/* filename */ "<GafferArnold::IECoreArnoldPreview::Renderer>",
+				/* methods */ g_cortexArnoldProceduralMethods,
+				/* version */ AI_VERSION
+			);
 		}
 
 		~ArnoldRenderer() override
 		{
 			pause();
+
+			AiNodeEntryUninstall( g_cortexProceduralArnoldString );
 		}
 
 		void option( const IECore::InternedString &name, const IECore::Object *value ) override
